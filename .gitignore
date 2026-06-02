@@ -1,0 +1,32 @@
+# ── Python ──────────────────────────────────────────────────
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+
+# ── Generated artifacts ──────────────────────────────────────
+model/*.pkl
+model/*.png
+data/hand-gestures.csv
+data/gesture_data.csv
+
+# ── Environment & secrets ─────────────────────────────────────
+.env
+.env.*
+*.env
+
+# ── Logs ─────────────────────────────────────────────────────
+*.log
+
+# ── OS / IDE ─────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+project_explanation.md
