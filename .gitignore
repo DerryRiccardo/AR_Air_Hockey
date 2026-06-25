@@ -8,7 +8,6 @@ __pycache__/
 
 # ── Generated artifacts ──────────────────────────────────────
 model/*.pkl
-model/*.png
 data/hand-gestures.csv
 data/gesture_data.csv
 
