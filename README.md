@@ -1,99 +1,168 @@
-# AR Air Hockey — Computer Vision Project
+# AR Air Hockey - Computer Vision Project
 
-Fingertip-tracked augmented-reality air hockey using MediaPipe hand detection
-and a trained gesture classifier.
+AR Air Hockey adalah project Computer Vision yang mengubah gesture tangan menjadi kontrol permainan air hockey. Sistem membaca tangan dari webcam, mendeteksi landmark dengan MediaPipe Hands, mengubah landmark menjadi fitur numerik, lalu memakai model machine learning untuk menentukan apakah paddle harus aktif atau diam.
 
----
+Project ini memiliki dua cara menjalankan aplikasi:
 
-## Project structure
+- `air_hockey.py` untuk versi desktop berbasis OpenCV window.
+- `app.py` untuk versi web app berbasis Flask dengan stream video di browser.
 
-```
+## Project Structure
+
+```text
 .
-├── prepare_dataset.py # Step 1 – prepare gesture dataset (from Zenodo CSV)
-├── train_model.py     # Step 2 – train & evaluate the MLP classifier
-├── air_hockey.py      # Step 3 – run the game
-├── requirements.txt
-├── data/
-│   ├── hand-gestures.csv  (input CSV; download link in prepare_dataset.py)
-│   └── gesture_data.csv   (created by prepare_dataset.py)
-└── model/
-    ├── gesture_model.pkl  (created by train_model.py)
-    ├── scaler.pkl
-    ├── confusion_matrix.png
-    └── training_curve.png
+|-- prepare_dataset.py
+|-- train_model.py
+|-- test.py
+|-- air_hockey.py
+|-- app.py
+|-- requirements.txt
+|-- README.md
+|-- project_explanation.md
+|-- data/
+|   |-- hand-gestures.csv
+|   `-- gesture_data.csv
+`-- model/
+    |-- gesture_model.pkl
+    |-- scaler.pkl
+    |-- confusion_matrix.png
+    |-- feature_importance.png
+    `-- training_curve.png
 ```
 
----
+## Main Workflow
 
-## How it works
+1. `prepare_dataset.py`
+   Membersihkan dataset gesture mentah dari Zenodo, menghapus fitur yang tidak informatif, mengecek keseimbangan kelas, lalu menyimpan `data/gesture_data.csv`.
 
-### 1  Hand detection — MediaPipe Hands (pre-trained)
-MediaPipe's `Hands` solution is itself a trained neural network (a lightweight
-MobileNet-based pipeline) that returns 21 3-D landmarks for each hand in the
-frame.  Landmark 8 is the index fingertip — that's the paddle position.
+2. `train_model.py`
+   Melatih dua model kandidat, yaitu Random Forest dan SVM RBF, lalu memilih model terbaik berdasarkan 5-fold cross-validation. Output utamanya adalah `model/gesture_model.pkl` dan `model/scaler.pkl`.
 
-### 2  Gesture classification — MLP trained by you
-A two-class MLP (128 → 64 → 2) is trained on the 63-dimensional landmark
-vector (21 joints × x, y, z).
+3. `test.py`
+   Menjalankan smoke test untuk memastikan dependency, kamera, model, dan pipeline inference siap dipakai.
 
-| Class | Gesture         | Game effect            |
-|-------|-----------------|------------------------|
-| 0     | Closed fist     | Paddle freezes         |
-| 1     | Index finger up | Paddle tracks fingertip|
+4. `air_hockey.py`
+   Menjalankan game desktop real-time dengan OpenCV.
 
-Training also fits a Random Forest baseline for comparison and prints a
-5-fold cross-validation accuracy report.
+5. `app.py`
+   Menjalankan web app Flask. Game loop tetap berjalan di background thread, lalu frame hasil render dikirim ke browser sebagai MJPEG stream melalui endpoint `/video_feed`.
 
-### 3  Game
-- Your paddle is constrained to the left half of the screen.
-- A simple AI tracks the puck's y-position on the right half.
-- Puck physics include wall bouncing, paddle-velocity transfer, and a speed cap.
-- The webcam feed is used as the table background (AR effect).
-- First to 7 goals wins.
+## How It Works
 
----
+### 1. Webcam Input
 
-## Setup (local — recommended, you have an RTX 2050)
+Webcam menangkap frame video secara real-time. Frame ini menjadi input awal untuk seluruh pipeline.
+
+### 2. Hand Detection with MediaPipe
+
+MediaPipe Hands mendeteksi hingga dua tangan dan menghasilkan 21 landmark untuk setiap tangan. Landmark 8 mewakili ujung jari telunjuk, yang dipakai sebagai dasar posisi paddle.
+
+### 3. Feature Extraction
+
+Koordinat landmark tidak langsung dipakai mentah. Sistem menghitung jarak Euclidean setiap landmark ke wrist, lalu menormalisasinya. Setelah `dist_0` dibuang, tersisa 20 fitur yang konsisten dengan data training.
+
+### 4. Gesture Classification
+
+Model memprediksi dua kelas:
+
+| Class | Gesture | Efek di Game |
+|---|---|---|
+| `0` | No pointing / closed fist | Paddle diam |
+| `1` | Pointing / index finger up | Paddle mengikuti ujung jari |
+
+### 5. Paddle Control and Game Logic
+
+Jika gesture aktif, paddle diperbarui berdasarkan posisi fingertip. Player 1 berada di sisi kiri layar dan Player 2 di sisi kanan. Puck lalu bergerak menggunakan physics sederhana: wall bounce, collision, goal detection, rally boost, dan speed cap.
+
+### 6. Rendering
+
+- `air_hockey.py`: render langsung ke window OpenCV dengan `cv2.imshow`.
+- `app.py`: render dikonversi menjadi JPEG dan di-stream ke browser dengan `multipart/x-mixed-replace`.
+
+## Web App Mode
+
+`app.py` menambahkan antarmuka browser untuk project ini. Arsitekturnya:
+
+- Flask menangani route web.
+- `game_loop()` berjalan di background thread.
+- Frame terbaru disimpan di state global sebagai JPEG bytes.
+- Browser mengambil stream dari `/video_feed`.
+- Tombol Start, Stop, Restart memanggil endpoint `/start`, `/stop`, dan `/restart`.
+- Endpoint `/status` dipakai front-end untuk menyinkronkan status game.
+
+Ini membuat project lebih mudah didemokan tanpa perlu membuka window OpenCV secara langsung.
+
+## Evaluation Summary
+
+Model dilatih dengan split 80/20 dan 5-fold stratified cross-validation. Dari hasil training terbaru:
+
+| Model | Test Accuracy | 5-Fold CV Mean | 5-Fold CV Std |
+|---|---:|---:|---:|
+| Random Forest | 0.9823 | 0.9825 | 0.0022 |
+| SVM RBF | 0.9864 | 0.9860 | 0.0012 |
+
+SVM RBF menjadi model aktif yang tersimpan di `model/gesture_model.pkl`.
+
+Highlight metric yang penting:
+
+- Accuracy tinggi karena dataset seimbang dan fiturnya cukup informatif.
+- Precision tinggi berarti prediksi gesture aktif jarang salah alarm.
+- Recall tinggi berarti gesture pointing jarang gagal dikenali.
+- F1-score tinggi berarti precision dan recall sama-sama baik.
+- Confusion matrix membantu melihat kesalahan per kelas, bukan hanya satu angka akurasi.
+
+## Setup
 
 ```bash
-# 1  Create a virtual environment
 python -m venv venv
-source venv/bin/activate       # Windows: venv\Scripts\activate
-
-# 2  Install dependencies
+venv\Scripts\activate
 pip install -r requirements.txt
+```
 
-# 3  Prepare dataset
+## Run Pipeline
+
+### 1. Prepare dataset
+
+```bash
 python prepare_dataset.py
+```
 
-# 4  Train the model
+### 2. Train model
+
+```bash
 python train_model.py
-# Outputs accuracy report + confusion matrix + training curve
+```
 
-# 5  Play
+### 3. Run smoke test
+
+```bash
+python test.py
+```
+
+## Run the App
+
+### Desktop version
+
+```bash
 python air_hockey.py
 ```
 
----
+### Web app version
 
-## Running on Google Colab (alternative)
-
-Colab does not support `cv2.imshow`.  Use this workaround:
-
-```python
-# At the top of any script, replace cv2.imshow with:
-from google.colab.patches import cv2_imshow
+```bash
+python app.py
 ```
 
-Webcam capture in Colab requires a JavaScript snippet to grab a single frame.
-For real-time play, run locally — Colab adds too much latency.
+Lalu buka:
 
----
+```text
+http://localhost:5000
+```
 
-## University report notes
+## Controls
 
-- **Model architecture**: 2-hidden-layer MLP (128, 64 neurons), ReLU activations, Adam optimiser, early stopping on validation loss.
-- **Feature engineering**: Raw landmark coordinates are normalised with `StandardScaler` (zero mean, unit variance) before training.
-- **Baseline**: Random Forest with 100 trees (no scaling needed).
-- **Evaluation**: 80/20 stratified train-test split + 5-fold cross-validation.
-- **Saved artefacts**: `model/confusion_matrix.png` and `model/training_curve.png` are ready to drop into your report.
+- Angkat jari telunjuk untuk menggerakkan paddle.
+- Gesture non-pointing membuat paddle diam.
+- Pada desktop app, tekan `Q` untuk keluar dan `R` untuk restart.
+- Pada web app, gunakan tombol Start, Stop, dan Restart di browser.
+
