@@ -15,6 +15,10 @@ import joblib
 import threading
 import math
 import random
+import time
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
 
 # =========================================================
@@ -289,11 +293,13 @@ def draw_goal_flash(display, flash_frames):
     cv2.addWeighted(overlay, alpha, display, 1 - alpha, 0, display)
 
 
-def draw_hud(display, score1, score2, active1, active2, winner, hits):
+def draw_hud(display, score1, score2, active1, active2, winner, hits, fps):
     cv2.putText(display, f"P1  {score1}", (DW//4 - 70, 50),
                 cv2.FONT_HERSHEY_DUPLEX, 1.2, C_P1, 2)
     cv2.putText(display, f"P2  {score2}", (3*DW//4 - 70, 50),
                 cv2.FONT_HERSHEY_DUPLEX, 1.2, C_P2, 2)
+    cv2.putText(display, f"FPS  {fps:.1f}", (DW//2 - 50, 85),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (220, 220, 220), 2)
 
     if hits > 0:
         cv2.putText(display, f"rally  {hits}", (DW//2 - 55, 50),
@@ -319,6 +325,37 @@ def draw_hud(display, score1, score2, active1, active2, winner, hits):
                     cv2.FONT_HERSHEY_DUPLEX, 2, (80,255,120), 4)
         cv2.putText(display, "Press R to restart", (tx+60, DH//2+40),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.9, (200,200,200), 2)
+
+
+def save_fps_figure(samples, output_path, title):
+    if not samples:
+        return
+
+    fig, ax = plt.subplots(figsize=(9, 4))
+    x = np.arange(1, len(samples) + 1)
+    ax.plot(x, samples, color="#4C72B0", linewidth=2, marker="o", markersize=4)
+    ax.set_title(title)
+    ax.set_xlabel("Second")
+    ax.set_ylabel("FPS")
+    ax.grid(True, alpha=0.3)
+    ax.set_ylim(bottom=0)
+
+    mean_fps = float(np.mean(samples))
+    min_fps = float(np.min(samples))
+    max_fps = float(np.max(samples))
+    summary = f"mean={mean_fps:.2f}, min={min_fps:.2f}, max={max_fps:.2f}"
+    ax.text(
+        0.02, 0.95, summary,
+        transform=ax.transAxes,
+        fontsize=9,
+        va="top",
+        bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.85),
+    )
+
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=140)
+    plt.close(fig)
+    print(f"Saved: {output_path}")
 
 
 # =========================================================
@@ -356,6 +393,10 @@ def main():
     # State to throttle prediction: save the last gesture for each hand to reduce CPU usage
     last_gesture = {}   # key: hand index, value: 0 or 1
     frame_count  = 0
+    fps = 0.0
+    fps_frames = 0
+    fps_last_time = time.perf_counter()
+    fps_samples = []
 
     print("AR Air Hockey (PvP) — point your index finger to control your paddle!")
 
@@ -365,11 +406,20 @@ def main():
             continue
 
         frame_count += 1
+        fps_frames += 1
 
         # Calculate crop margins based on original frame dimensions to avoid double-resizing
         h_cam, w_cam = frame.shape[:2]
         margin_x = (1.0 - 1.0 / CAM_ZOOM) / 2.0
         margin_y = (1.0 - 1.0 / CAM_ZOOM) / 2.0
+
+        now = time.perf_counter()
+        elapsed = now - fps_last_time
+        if elapsed >= 1.0:
+            fps = fps_frames / elapsed
+            fps_samples.append(fps)
+            fps_frames = 0
+            fps_last_time = now
 
         # MediaPipe tetap jalan pada full frame untuk deteksi terbaik
         rgb     = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -446,7 +496,7 @@ def main():
         draw_goal_flash(display, goal_flash)
         draw_bloom(display, puck, p1, p2)
         draw_objects(display, puck, p1, p2, speed_ratio)
-        draw_hud(display, score1, score2, active1, active2, winner, puck.hits)
+        draw_hud(display, score1, score2, active1, active2, winner, puck.hits, fps)
 
         # Screen shake
         ox, oy = shake.offset()
@@ -468,6 +518,7 @@ def main():
     hands.close()
     cam.stop()
     cap.release()
+    save_fps_figure(fps_samples, "model/fps_desktop.png", "Desktop FPS Over Time")
     cv2.destroyAllWindows()
 
 
