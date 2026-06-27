@@ -40,6 +40,8 @@ C_P2      = (255, 80,  80)
 C_LINE    = (60,  255, 60)
 C_PUCK_GL = (180, 140, 255)
 CAM_ZOOM  = 1.6
+FPS_WARMUP_SECONDS = 5.0
+FPS_CAPTURE_SECONDS = 60.0
 
 _bloom_src = np.zeros((DH, DW, 3), dtype=np.uint8)
 
@@ -374,6 +376,8 @@ def game_loop():
     fps_frames = 0
     fps_last_time = time.perf_counter()
     fps_samples = []
+    benchmark_start_time = time.perf_counter()
+    benchmark_saved = False
 
     margin_x = (1.0 - 1.0 / CAM_ZOOM) / 2.0
     margin_y = (1.0 - 1.0 / CAM_ZOOM) / 2.0
@@ -396,9 +400,20 @@ def game_loop():
         elapsed = now - fps_last_time
         if elapsed >= 1.0:
             fps = fps_frames / elapsed
-            fps_samples.append(fps)
+            benchmark_elapsed = now - benchmark_start_time
+            if FPS_WARMUP_SECONDS <= benchmark_elapsed < FPS_WARMUP_SECONDS + FPS_CAPTURE_SECONDS:
+                fps_samples.append(fps)
             fps_frames = 0
             fps_last_time = now
+
+        benchmark_elapsed = now - benchmark_start_time
+        if (not benchmark_saved) and benchmark_elapsed >= FPS_WARMUP_SECONDS + FPS_CAPTURE_SECONDS:
+            save_fps_figure(
+                fps_samples,
+                "model/fps_webapp.png",
+                f"Web App FPS Over Time",
+            )
+            benchmark_saved = True
 
         rgb     = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = hands.process(rgb)
@@ -497,7 +512,12 @@ def game_loop():
     hands.close()
     cam.stop()
     cap.release()
-    save_fps_figure(fps_samples, "model/fps_webapp.png", "Web App FPS Over Time")
+    if not benchmark_saved:
+        save_fps_figure(
+            fps_samples,
+            "model/fps_webapp.png",
+            f"Web App FPS Over Time",
+        )
     with state.lock:
         state.latest_jpeg = None
         state.running     = False
